@@ -1,0 +1,14 @@
+*.fls
+*.aux
+*.fdb_latexmk
+*.log
+*.pkt
+*.svg
+_minted/
+*.bbl
+*-SAVE-ERROR
+*.bcf
+*.blg
+*.out
+*.run.xml
+target/
