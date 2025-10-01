@@ -33,8 +33,21 @@ int eval(struct Ast *expr) {
 struct Ast *parse(char **input);
 
 int main() {
-  char *expr_str = "2 + 3 * (4 + 5)";
-  struct Ast *expr = parse(&expr_str);
+  struct Ast *expr = malloc(sizeof(struct Ast));
+  *expr = (struct Ast){
+      .kind = ADD,
+      .data.add = {
+          .left = &(struct Ast){.kind = NUM, .data.num = "2"},
+          .right = &(struct Ast){
+              .kind = MUL,
+              .data.mul = {
+                  .left = &(struct Ast){.kind = NUM, .data.num = "3"},
+                  .right = &(struct Ast){
+                      .kind = ADD,
+                      .data.add = {
+                          .left = &(struct Ast){.kind = NUM, .data.num = "4"},
+                          .right =
+                              &(struct Ast){.kind = NUM, .data.num = "5"}}}}}}};
   int result = eval(expr); // 29
 
   // ensure we have an ADD node, otherwise we could be writing to an incorrect

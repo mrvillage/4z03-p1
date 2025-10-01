@@ -21,6 +21,14 @@ def eval(expr):
 def parse(input):
     pass
 
-expr_str = "2 + 3 * (4 + 5)"
-expr = parse(expr_str)
+expr = Add(
+    Num("2"),
+    Mul(
+	Num("3"),
+	Add(
+	    Num("4"),
+	    Num("5")
+	)
+    )
+)
 result = eval(expr) # 29

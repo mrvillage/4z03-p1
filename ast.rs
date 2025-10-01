@@ -17,8 +17,13 @@ fn parse<'a>(input: &'a str) -> Ast<'a> {
 }
 
 fn main() {
-    let expr_str = String::from("2 + 3 * (4 + 5)");
-    let expr = parse(&expr_str);
+    let expr = Ast::Add(
+        Box::new(Ast::Num("2")),
+        Box::new(Ast::Mul(
+            Box::new(Ast::Num("3")),
+            Box::new(Ast::Add(Box::new(Ast::Num("4")), Box::new(Ast::Num("5")))),
+        )),
+    );
     let result = eval(&expr); // 29
 
     let mut expr = Ast::Add(Box::new(Ast::Num("2")), Box::new(Ast::Num("3")));

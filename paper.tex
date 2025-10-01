@@ -46,7 +46,7 @@ type Node {
 }
 \end{minted}
 We also define a recursive function \texttt{sum} that computes the sum of all values in the provided tree.
-\begin{minted}{go}
+\begin{minted}{typescript}
 function sum(root: Node): Int {
   acc := root.value;
   if (root.left != nil) {
@@ -176,7 +176,7 @@ Finally, to deconstruct the tree and take ownership of the left node, we assign 
 }
 \end{minted}
 
-Rust does not provide its own allocator; instead, it relies on the system allocator. For example, on Linux, this is often the \texttt{malloc} and \texttt{free} provided by glibc. glibc utilizes a series of arenas (contiguous blocks of memory) and bins (linked lists of free chunks within an arena) to optimize multi-threaded performance and allow for the reuse of memory without performing memory compaction, but at the risk of fragmentation. In broad terms, all free chunks allocated by glibc contain metadata that point to the next and previous chunks in the bin, allowing \texttt{malloc} to easily find free chunks, or request new chunks from the operating system if needed, and \texttt{free} to easily add chunks to the appropriate bin.\autocite{glibc}
+Rust does not provide its own allocator; instead, it relies on the system allocator. For example, on Linux, this is often the \texttt{malloc} and \texttt{free} provided by glibc. glibc utilizes a series of arenas, which enable it to support multi-threading by creating new arenas as contention for existing arenas increases. Each arena then contains its own set of heaps, which are contiguous regions of memory obtained from the operating system using \texttt{mmap} or \texttt{sbrk}. Heaps are further subdivided into chunks of various sizes and sorted into bins based on their size. Each bin contains a linked list of free chunks within that arena, allowing multiple threads to request memory from different arenas without contention and reuse memory without performing memory compaction, albeit at the risk of fragmentation. When a chunk is free, it contains metadata that includes pointers to the next and previous chunks in the bin, allowing \texttt{malloc} to easily find free chunks and \texttt{free} to easily add chunks to the appropriate bin without requiring any memory beyond the chunk itself.\texttt{glibc}
 
 Below is a diagram illustrating a simplified memory layout of our stack and heap after deconstructing our tree, but before final cleanup.
 \begin{figure}[H]
@@ -210,7 +210,7 @@ This memory layout results in gaps on the heap. However, since Rust uses the sys
 
 Rust, however, is not limited to a single solution for type indirection; rather, it offers several options including typical heap allocation using (\texttt{Box<T>}, as we saw above), reference-counted types (\texttt{Rc<T>} or \texttt{Arc<T>}), and, of course, references (\texttt{\&T}). We have already covered \texttt{Box<T>}, so we now turn our attention to the remaining two.\autocite[\href{https://doc.rust-lang.org/book/ch15-00-smart-pointers.html}{chap.~15}]{rust-book}
 
-Reference-counted types function more like garbage collection. The actual \texttt{Rc<T>} is only a pointer to the inner \texttt{T} and the count of active references (stored as \texttt{RcInner<T>}). When a \texttt{Rc<T>} is cloned (a new instance is created referring to the same inner \texttt{T}), the inner counts are incremented. When one is dropped (deallocated), the inner counts are decremented through the \texttt{Drop} trait, analogous to a destructor. Since these types are part of the standard library (not compiler internals), when the reference count reaches zero, the inner memory is deallocated just like any other heap-allocated chunk of memory (i.e., handled by the system allocator). Rust has two such types, \texttt{Rc<T>} and \texttt{Arc<T}, the difference being that \texttt{Rc<T>} is restricted to a single thread and thus uses a plain location in memory to store its reference count, while \texttt{Arc<T>} can be sent safely between threads and uses an atomic internally for its reference count.\autocites[\href{https://doc.rust-lang.org/book/ch15-04-rc.html}{chap.~15~\S~4}]{rust-book}{rust-rc}{rust-arc}
+Reference-counted types function more like garbage collection. The actual \texttt{Rc<T>} is only a pointer to the inner \texttt{T} and the count of active strong and weak references (stored as \texttt{RcInner<T>}). When a \texttt{Rc<T>} is cloned (a new instance is created referring to the same inner \texttt{T}), the inner strong reference count is incremented. When one is dropped (deallocated), the inner strong reference count is decremented through the \texttt{Drop} trait, analogous to a destructor. Weak references on the other hand, are created manually to handle potentially cyclic use cases. Since these types are part of the standard library (not compiler internals), when the reference count reaches zero, the inner memory is deallocated just like any other heap-allocated chunk of memory (i.e., handled by the system allocator). Rust has two such types, \texttt{Rc<T>} and \texttt{Arc<T}, the difference being that \texttt{Rc<T>} is restricted to a single thread and thus uses a plain location in memory to store its reference count, while \texttt{Arc<T>} can be sent safely between threads and uses an atomic internally for its reference count.\autocites[\href{https://doc.rust-lang.org/book/ch15-04-rc.html}{chap.~15~\S~4}]{rust-book}{rust-rc}{rust-arc}
 \begin{figure}[H]
 	\centering
 	\begin{tikzpicture}[font=\sffamily, seg/.style={draw, thick, minimum height=1cm, minimum width=1.2cm, align=center}]
@@ -262,8 +262,16 @@ fn parse<'a>(input: &'a str) -> Ast<'a> {
 }
 
 fn main() {
-    let expr_str = String::from("2 + 3 * (4 + 5)");
-    let expr = parse(&expr_str);
+    let expr = Ast::Add(
+	Box::new(Ast::Num("2")),
+	Box::new(Ast::Mul(
+	    Box::new(Ast::Num("3")),
+	    Box::new(Ast::Add(
+		Box::new(Ast::Num("4")),
+		Box::new(Ast::Num("5"))
+	    ))
+	))
+    );
     let result = eval(&expr); // 29
 }
 
@@ -434,11 +442,27 @@ int eval(struct Ast *expr) {
   }
 }
 
-struct Ast *parse(char **input);
-
 int main() {
-  char *expr_str = "2 + 3 * (4 + 5)";
-  struct Ast *expr = parse(&expr_str);
+  struct Ast *expr = malloc(sizeof(struct Ast));
+  *expr = (struct Ast){
+    .kind = ADD,
+    .data.add = {
+      .left = &(struct Ast){.kind = NUM, .data.num = "2"},
+      .right = &(struct Ast){
+        .kind = MUL,
+        .data.mul = {
+        .left = &(struct Ast){.kind = NUM, .data.num = "3"},
+	  .right = &(struct Ast){
+	    .kind = ADD,
+	    .data.add = {
+	      .left = &(struct Ast){.kind = NUM, .data.num = "4"},
+	      .right = &(struct Ast){.kind = NUM, .data.num = "5"}
+	    }
+	  }
+	}
+      }
+    }
+  };
   int result = eval(expr); // 29
 }
 \end{minted}
@@ -557,11 +581,16 @@ def eval(expr):
     elif isinstance(expr, Num):
         return int(expr.num)
 
-def parse(input):
-    pass
-
-expr_str = "2 + 3 * (4 + 5)"
-expr = parse(expr_str)
+expr = Add(
+    Num("2"),
+    Mul(
+	Num("3"),
+	Add(
+	    Num("4"),
+	    Num("5")
+	)
+    )
+)
 result = eval(expr) # 29
 \end{minted}
 
@@ -671,12 +700,9 @@ eval :: Ast -> Int
 eval (Add left right) = eval left + eval right
 eval (Mul left right) = eval left * eval right
 eval (Num num) = read num :: Int
-parse :: String -> Ast
-parse input = undefined
 main :: IO ()
 main = do
-    let expr_str = "2 + 3 * (4 + 5)"
-    let expr = parse expr_str
+    let expr = Add (Num "2") (Mul (Num "3") (Add (Num "4") (Num "5")))
     let result = eval expr -- 29
     print result
 \end{minted}
@@ -896,16 +922,16 @@ main = do
 Every language we have examined has offered a different set of features for memory management and recursive data types. C relies directly on raw pointers and manual memory management, providing maximum control but providing no protection against double-free, use-after-free, or memory leaks. On the opposite end of the spectrum, Haskell provides automatic garbage collection with built-in protection against reference cycles through its generational design. In the middle, we have languages like Rust, which guarantee memory safety through its ownership and borrowing system, preventing use-after-free and double-free vulnerabilities at compile time. Finally, Python provides automatic memory management through reference counting but does not have cycle detection by default.
 \begin{table}[H]
 	\centering
-	\begin{tabular}{p{2cm}|p{4cm}|p{6cm}}
-		Language & Memory Management                          & Fragmentation                    \\
+	\begin{tabular}{p{2cm}|p{3cm}|p{4cm}|p{3cm}}
+		Language & Memory Management                          & Fragmentation                    & Allocator                               \\
 		\hline
-		Rust     & Ownership \& borrowing, reference counting & Yes, handled by system allocator \\
+		Rust     & Ownership \& borrowing, reference counting & Yes, handled by system allocator & System (i.e., glibc)                    \\
 		\hline
-		C        & Manual                                     & Yes, handled by system allocator \\
+		C        & Manual                                     & Yes, handled by system allocator & System (i.e., glibc)                    \\
 		\hline
-		Python   & Reference counting                         & Yes, handled by system allocator \\
+		Python   & Reference counting                         & Yes, handled by system allocator & \texttt{pymalloc}, system (i.e., glibc) \\
 		\hline
-		Haskell  & Garbage collection                         & No, handled by garbage collector \\
+		Haskell  & Garbage collection                         & No, handled by garbage collector & Generational garbage collector          \\
 	\end{tabular}
 	\caption{Summary of memory management}
 \end{table}
@@ -929,20 +955,20 @@ Every language we have examined has offered a different set of features for memo
 However, each memory management strategy comes with varying degrees of runtime overhead. Manual memory management, as in C, has no overhead beyond the cost of allocation and deallocation. Rust's ownership and borrowing system also has no runtime overhead since all code compiles down to manual memory management. However, reference counting through \texttt{Rc} and \texttt{Arc} incurs the overhead of incrementing and decrementing the reference count on clones and drops, with \texttt{Arc} also incurring the additional overhead of atomic operations to enable multi-threaded use. Python's reference counting also has the overhead of incrementing and decrementing the reference count, but unlike Rust, it has an optional garbage collector to detect cyclic references. Finally, Haskell's garbage collector has the most overhead since it must periodically stop the program to scan the heap for unreachable objects. However, Haskell's generational design allows it to optimize for the most common case of short-lived objects, enabling it to scan only certain generations rather than the entire heap on every run.
 \begin{table}[H]
 	\centering
-	\begin{tabular}{p{3cm}|p{2cm}|p{6cm}}
-		Language                      & Runtime Overhead & Safety Guarantees                                                                                \\
+	\begin{tabular}{p{2cm}|p{2cm}|p{4cm}|p{4cm}}
+		Language                      & Runtime Overhead & Safety Guarantees                                                                                & Memory Footprint                                              \\
 		\hline
-		Rust (Ownership \& Borrowing) & None             & Prevents use-after-free and double-free at compile time, cycles cannot exist                     \\
+		Rust (Ownership \& Borrowing) & None             & Prevents use-after-free and double-free at compile time, cycles cannot exist                     & Data                                                          \\
 		\hline
-		Rust (Rc/Arc)                 & Minor            & Prevents use-after-free and double-free at compile time, but no cycle detection                  \\
+		Rust (Rc/Arc)                 & Minor            & Prevents use-after-free and double-free at compile time, but no cycle detection                  & Pointer to ref count + data                                   \\
 		\hline
-		C                             & None             & No protection against use-after-free, double-free, or memory leaks, no protection against cycles \\
+		C                             & None             & No protection against use-after-free, double-free, or memory leaks, no protection against cycles & Data                                                          \\
 		\hline
-		Python                        & Minor            & Prevents use-after-free and double-free, but no cycle detection by default                       \\
+		Python                        & Minor            & Prevents use-after-free and double-free, but no cycle detection by default                       & Pointer to ref count + object + hash map + pointers to fields \\
 		\hline
-		Python (with GC)              & Significant      & Prevents use-after-free and double-free, prevents cycles                                         \\
+		Python (with GC)              & Significant      & Prevents use-after-free and double-free, prevents cycles                                         & Pointer to ref count + object + hash map + pointers to fields \\
 		\hline
-		Haskell                       & Significant      & Prevents use-after-free and double-free, prevents cycle                                          \\
+		Haskell                       & Significant      & Prevents use-after-free and double-free, prevents cycle                                          & Pointer to info table + pointers to fields                    \\
 	\end{tabular}
 	\caption{Summary of memory management and runtime overhead}
 \end{table}
